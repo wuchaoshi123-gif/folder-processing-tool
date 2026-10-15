@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 数据库（不上传，本地保留）
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+*.db.bak
+
+# 敏感配置
+config.json
+.env
+
+# 输出与日志
+exports/
+_logs/
+*_backup_*.db
+*_predelete_*.db
+*_preimport_*.db
+*_preretrans_*.db
+*_preupper_*.db
+
+# 备份文件
+*.bak
+*.bak.*
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 大模型缓存
+.cache/
+tensorrt_engine_cache/
