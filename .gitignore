@@ -45,4 +45,4 @@ desktop.ini
 
 # 大模型缓存
 .cache/
-tensorrt_engine_cache/
+tensorrt_engine_cache/tab_g_config_*.json 
