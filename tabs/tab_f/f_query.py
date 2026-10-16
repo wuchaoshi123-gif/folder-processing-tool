@@ -4,6 +4,13 @@ import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+# ★ 尺码派生字段工具
+from .f_size_filter import (
+    is_size_field,
+    LEGACY_SIZE_OPS,
+    evaluate_row_condition,
+)
+
 
 class FQueryMixin:
     """查询/排序/渲染/分页/相似度"""
@@ -15,10 +22,19 @@ class FQueryMixin:
         row = ttk.Frame(self.conditions_frame)
         row.pack(fill="x", pady=2)
 
+        # ★ 字段下拉：真实字段 + 分隔线 + 尺码派生字段
+        SEP = self.FIELD_SEP  # 见 f_main.py 新增常量
+        real_items = [f"{f[1]}({f[0]})" for f in self.FIELDS]
+        derived_items = [
+            f"{f[1]}({f[0]})"
+            for f in self.FILTER_FIELDS[len(self.FIELDS):]
+        ]
+        field_values = real_items + [SEP] + derived_items
+
         field_var = tk.StringVar(value=self.FIELDS[0][0])
         ttk.Combobox(
-            row, textvariable=field_var, width=15, state="readonly",
-            values=[f"{f[1]}({f[0]})" for f in self.FIELDS],
+            row, textvariable=field_var, width=22, state="readonly",
+            values=field_values, height=25,  # ★ 一次显示 25 行
         ).pack(side="left", padx=2)
 
         op_var = tk.StringVar(value="包含")
@@ -53,14 +69,14 @@ class FQueryMixin:
         return self._collect_conditions_from_list(self.conditions)
 
     def _collect_conditions_from_list(self, conditions):
-        """
-        把条件列表转为 SQL WHERE
-        """
+        """把条件列表转为 SQL WHERE（只处理 SQL 可处理的条件）"""
         where_parts = []
         params = []
 
         for field_var, op_var, kw_var in conditions:
             field_str = field_var.get()
+            if field_str == "──────────────":  # ★ 跳过分隔线
+                continue
             field = (field_str.split("(")[-1].rstrip(")")
                      if "(" in field_str else field_str)
             op = op_var.get()
@@ -98,9 +114,7 @@ class FQueryMixin:
                     params.append(num)
                 continue
 
-            # ============================================================
-            # ★ 字符长度比较
-            # ============================================================
+            # 字符长度比较
             if op.startswith("字符长度"):
                 if not kw:
                     continue
@@ -109,7 +123,6 @@ class FQueryMixin:
                 except ValueError:
                     continue
 
-                # SQL: LENGTH(field)
                 if op == "字符长度小于":
                     where_parts.append(f"LENGTH({field}) < ?")
                     params.append(num)
@@ -174,24 +187,26 @@ class FQueryMixin:
             if not self._conn:
                 return
 
-        # ★ 分离出需要 Python 过滤的条件
-        py_filters = []  # [(field, op, kw), ...]
-        sql_conditions = []  # 只保留 SQL 能处理的条件
+        # ★ 分离条件
+        py_filters = []       # [(field, op, kw), ...] 尺码派生字段 / 老操作符
+        sql_conditions = []   # [(field_var, op_var, kw_var), ...]
 
         for field_var, op_var, kw_var, _ in self.conditions:
             field_str = field_var.get()
+            if field_str == "──────────────":
+                continue
             field = (field_str.split("(")[-1].rstrip(")")
                      if "(" in field_str else field_str)
             op = op_var.get()
             kw = kw_var.get().strip()
 
-            # ★ 需要 Python 端过滤的操作符
-            if op in ("尺码跨度大于", "含半码"):
+            # 新的尺码虚拟字段 或 老的兼容操作符 → Python 端过滤
+            if is_size_field(field) or op in LEGACY_SIZE_OPS:
                 py_filters.append((field, op, kw))
             else:
                 sql_conditions.append((field_var, op_var, kw_var))
 
-        # ---------- 1. SQL 查询（其他条件） ----------
+        # ---------- 1. SQL 查询 ----------
         where_parts, params = self._collect_conditions_from_list(sql_conditions)
         logic = self.logic_var.get() or "AND"
 
@@ -209,108 +224,54 @@ class FQueryMixin:
             messagebox.showerror("查询失败", str(e))
             return
 
-        # ---------- 2. Python 端过滤（尺码跨度、含半码） ----------
+        # ---------- 2. Python 端过滤 ----------
+        warn = ""
         if py_filters:
+            has_sql = bool(sql_conditions)
+            if logic == "OR" and has_sql:
+                warn = " ⚠️ OR 混合筛选(PY端按AND)"
             self._all_rows = self._apply_python_filters(
-                self._all_rows, py_filters)
+                self._all_rows, py_filters,
+                logic=logic, has_sql_conditions=has_sql)
 
         # ---------- 3. 更新界面 ----------
         self._sort_column = None
         self._sort_reverse = False
         self._current_page = 1
 
-        filter_note = ""
-        if py_filters:
-            filter_note = f" (含 {len(py_filters)} 个特殊筛选)"
-
+        note = f" (含 {len(py_filters)} 个尺码筛选)" if py_filters else ""
         self.status_var.set(
-            f"查询完成: {len(self._all_rows):,} 条{filter_note}")
+            f"查询完成: {len(self._all_rows):,} 条{note}{warn}")
         self._update_edit_scope()
         self._render_page()
 
     # ============================================================
-    #   ★ Python 端过滤（尺码跨度、含半码）
+    #   ★ Python 端过滤（尺码派生字段）
     # ============================================================
-    def _apply_python_filters(self, rows, py_filters):
-        """对查询结果做 Python 端过滤"""
-        result = rows
+    def _apply_python_filters(self, rows, py_filters,
+                              logic="AND", has_sql_conditions=False):
+        """
+        rows:         list[dict]
+        py_filters:   [(field, op, kw), ...]
+        logic:        "AND" / "OR"
+        has_sql_conditions: 是否同时存在 SQL 条件（用于 OR 降级）
+        返回过滤后的 list[dict]
+        """
+        if not py_filters:
+            return rows
 
-        for field, op, kw in py_filters:
-            filtered = []
+        # 只有纯 Python 条件时才按用户逻辑 OR；混合场景下 PY 端统一 AND
+        # （混合 OR 已在状态栏提示）
+        use_or = (logic == "OR" and not has_sql_conditions)
 
-            for row in result:
-                value = row.get(field, "") or ""
-
-                if op == "尺码跨度大于":
-                    if self._check_size_span(value, kw):
-                        filtered.append(row)
-
-                elif op == "含半码":
-                    if self._check_has_half(value, kw):
-                        filtered.append(row)
-
-            result = filtered
-
+        result = []
+        for row in rows:
+            flags = [evaluate_row_condition(row, f, o, k)
+                     for f, o, k in py_filters]
+            ok = any(flags) if use_or else all(flags)
+            if ok:
+                result.append(row)
         return result
-
-    @staticmethod
-    def _check_size_span(value, kw):
-        """
-        检查尺码跨度（相邻尺码差值）
-        kw: 阈值，如 "1" 表示找差值 > 1 的
-        """
-        if not value or not kw:
-            return False
-
-        try:
-            threshold = float(kw)
-        except ValueError:
-            return False
-
-        # 解析尺码列表
-        parts = [s.strip() for s in str(value).split(",") if s.strip()]
-        if len(parts) < 2:
-            return False
-
-        nums = []
-        for p in parts:
-            try:
-                nums.append(float(p))
-            except ValueError:
-                continue
-
-        if len(nums) < 2:
-            return False
-
-        nums = sorted(set(nums))
-        # 检查相邻差值
-        for i in range(len(nums) - 1):
-            diff = nums[i + 1] - nums[i]
-            if diff > threshold + 0.01:  # 浮点容差
-                return True
-
-        return False
-
-    @staticmethod
-    def _check_has_half(value, kw):
-        """
-        检查是否含半码
-        kw: "是" 或 "否" 或 留空（默认找有半码的）
-        """
-        if not value:
-            has_half = False
-        else:
-            # 检查是否有 .5
-            has_half = any(
-                ".5" in s.strip()
-                for s in str(value).split(",")
-            )
-
-        if kw in ("否", "no", "n", "0", "没有"):
-            return not has_half
-        else:
-            # 默认找"含半码"的
-            return has_half
 
     def _show_all(self):
         if not self._conn:
@@ -375,7 +336,6 @@ class FQueryMixin:
     #                    渲染
     # ============================================================
     def _render_page(self):
-        """渲染当前页（无 check 列）"""
         for item in self.tree.get_children():
             self.tree.delete(item)
 
@@ -421,47 +381,9 @@ class FQueryMixin:
         self.page_info_var.set(f"{self._current_page} / {total_pages}")
         self._update_checked_info()
 
-
-    def _on_ctrl_a(self, event):
-        """
-        Ctrl+A：全选**当前页面**的复选框
-        （不影响其他页面的勾选状态）
-        """
-        children = self.tree.get_children()
-        if not children:
-            return "break"
-
-        try:
-            page_size = int(self.page_size_var.get())
-        except ValueError:
-            page_size = 100
-
-        start = (self._current_page - 1) * page_size
-
-        for i, iid in enumerate(children):
-            real_idx = start + i
-            if 0 <= real_idx < len(self._all_rows):
-                self._all_rows[real_idx]["_checked"] = True
-                # 更新当前行显示
-                values = list(self.tree.item(iid, "values"))
-                if values:
-                    values[0] = "☑"
-                    self.tree.item(iid, values=values)
-
-        self._update_checked_info()
-        self.set_status(
-            f"✅ 已全选当前页 ({len(children)} 行)")
-
-        # ★ 阻止 Treeview 默认的全选行行为
-        return "break"
-
     # ============================================================
-    #   ★ 选中管理
+    #   ★ 选中管理（去重，保留原生 selection 版本）
     # ============================================================
-    def _on_selection_changed(self, event):
-        """选中变化时更新数量"""
-        self._update_checked_info()
-
     def _on_ctrl_a(self, event):
         """Ctrl+A: 全选当前页所有行"""
         children = self.tree.get_children()
@@ -474,20 +396,20 @@ class FQueryMixin:
         self.set_status(
             f"✅ 已选中当前页 {len(children)} 行")
 
-        # 阻止 Treeview 默认行为
         return "break"
 
+    def _on_selection_changed(self, event):
+        """选中变化时更新数量"""
+        self._update_checked_info()
+
     def _update_checked_info(self):
-        """更新"已选"数量（基于原生 selection）"""
+        """更新已选数量（基于原生 selection）"""
         n = len(self.tree.selection())
         total = len(self.tree.get_children())
         self.checked_info_var.set(f"已选: {n} / {total}")
 
     def _get_selected_rows(self):
-        """
-        获取当前选中的行（返回 _all_rows 里的 dict 列表）
-        供后续批量处理使用
-        """
+        """获取当前选中的行（返回 _all_rows 里的 dict 列表）"""
         sel = self.tree.selection()
         if not sel:
             return []
@@ -507,11 +429,6 @@ class FQueryMixin:
                 result.append(self._all_rows[real_idx])
 
         return result
-
-    def _update_checked_info(self):
-        """更新已选数量"""
-        n = sum(1 for r in self._all_rows if r.get("_checked", True))
-        self.checked_info_var.set(f"已选: {n:,} / {len(self._all_rows):,}")
 
     def _reset_page(self):
         self._current_page = 1

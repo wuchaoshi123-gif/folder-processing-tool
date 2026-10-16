@@ -9,6 +9,9 @@ from tkinter import ttk, messagebox, filedialog
 import sqlite3
 from ..base_tab import BaseTab
 
+# ★ 尺码派生字段（用于筛选，不进入表格）
+from .f_size_filter import SIZE_DERIVED_FIELDS  # noqa: F401
+
 # ★ 列宽配置文件（用户 APPDATA）
 APP_NAME = "FolderProcessingTool"
 AUTO_CFG_DIR = Path(os.getenv("APPDATA", Path.home())) / APP_NAME
@@ -37,28 +40,23 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
     TAB_KEY = "F"
 
     # ============================================================
-    #   常量（所有 Mixin 共享，通过 self.XXX 访问）
+    #   常量
     # ============================================================
-
-    # ★ 列默认宽度（字符单位，1 字符 ≈ 8 像素）
-    #    用户可以拖动列分隔线修改，会自动保存到
-    #    %APPDATA%\FolderProcessingTool\tab_f_col_widths.json
     DEFAULT_COL_WIDTHS = {
-        "id":            15,   # ID
-        "nums":          15,   # 编号
-        "onlymulu":      35,   # 唯一目录
-        "englishname":   45,   # 英文名称
-        "bands":         15,   # 品牌
-        "shoessize":     25,   # 尺码
-        "chuprice":      12,   # 价格
-        "images":        12,   # 图片数
-        "rufanyi":       30,   # 俄语翻译
-        "web_url":       35,   # 网络URL
-        "bandsizechart": 30,   # 尺码表
-        "created_at":    20,   # 入库时间
+        "id":            15,
+        "nums":          15,
+        "onlymulu":      35,
+        "englishname":   45,
+        "bands":         15,
+        "shoessize":     25,
+        "chuprice":      12,
+        "images":        12,
+        "rufanyi":       30,
+        "web_url":       35,
+        "bandsizechart": 30,
+        "created_at":    20,
     }
-    COL_WIDTH_UNIT = 8   # 像素/字符
-
+    COL_WIDTH_UNIT = 8
 
     XLSX_COLUMNS = [
         "nums", "onlymulu", "englishname", "local_url", "web_url", "rufanyi",
@@ -71,6 +69,7 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         "尺码表", "源目录", "入库时间",
     ]
 
+    # ★ 表格列（真实字段）
     FIELDS = [
         ("id", "ID", "int"),
         ("nums", "编号", "int"),
@@ -84,6 +83,18 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         ("web_url", "网络URL", "text"),
         ("bandsizechart", "尺码表", "text"),
         ("created_at", "入库时间", "text"),
+
+    ]
+    
+    FIELD_SEP = "----------"
+    # ★ 筛选字段（真实字段 + 尺码派生字段）
+    #   注意：派生字段仅用于筛选，不进入表格渲染
+    FILTER_FIELDS = FIELDS + [
+        ("size_first",    "尺码首值", "float"),
+        ("size_last",     "尺码末值", "float"),
+        ("size_span",     "尺码差值", "float"),
+        ("size_count",    "尺码个数", "int"),
+        ("size_has_half", "含半码",  "int"),
     ]
 
     EDITABLE_FIELDS = [
@@ -107,7 +118,6 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         "值个数小于", "值个数等于", "值个数大于",
         "值个数小于等于", "值个数大于等于",
         "尺码跨度大于", "含半码",
-        # ★ 新增: 字符长度
         "字符长度小于", "字符长度等于", "字符长度大于",
         "字符长度小于等于", "字符长度大于等于",
     ]
@@ -153,15 +163,10 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
     #                    UI 构建
     # ============================================================
     def _build_ui(self):
-        self._load_col_widths()  # ★ 先加载用户保存的列宽
+        self._load_col_widths()
         self._build_section_data_source()
         self._build_section_xlsx_io()
 
-        # ==========================================================
-        # ★ 2×2 田字格容器
-        #   上左: 筛选条件        上右: 批量修改
-        #   下左: 相似度筛选      下右: 二次翻译
-        # ==========================================================
         grid_frame = ttk.Frame(self)
         grid_frame.pack(fill="x", padx=6, pady=(0, 4))
         grid_frame.columnconfigure(0, weight=1, uniform="f_col")
@@ -176,7 +181,6 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         self._build_section_pagination()
         self._build_section_status_bar()
 
-        # 内部状态
         self._conn = None
         self._all_rows = []
         self._sort_column = None
@@ -186,17 +190,13 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         self.app.root.after(800, self._auto_load_db)
 
     def _build_section_data_source(self):
-        """数据源 + xlsx 导入导出（单行合并布局）
-        ★ 路径框占 2/3 宽度，剩余 1/3 作为隐形 spacer
-        """
+        """数据源 + xlsx 导入导出"""
         top = ttk.LabelFrame(self, text=" 数据源 & xlsx ", padding=6)
         top.pack(fill="x", padx=6, pady=(6, 4))
 
-        # ★ 路径框权重 2，spacer 列权重 1 → 路径框占 2/3 宽度
-        top.columnconfigure(1, weight=2)  # 路径框
-        top.columnconfigure(5, weight=1)  # 隐形 spacer
+        top.columnconfigure(1, weight=2)
+        top.columnconfigure(5, weight=1)
 
-        # ---- 左：数据库路径 + 按钮 + 统计 ----
         ttk.Label(top, text="数据库:").grid(row=0, column=0, sticky="w")
 
         self.db_path_var = tk.StringVar()
@@ -214,14 +214,11 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
                   font=("Consolas", 9)).grid(
             row=0, column=4, padx=(6, 8))
 
-        # ---- 中：隐形 spacer ----
         ttk.Frame(top, width=1).grid(row=0, column=5, sticky="ew")
 
-        # ---- 中：竖线分隔 ----
         ttk.Separator(top, orient="vertical").grid(
             row=0, column=6, sticky="ns", padx=6)
 
-        # ---- 右：导出 + 导入 ----
         ttk.Label(top, text="导出:").grid(row=0, column=7, sticky="w")
         ttk.Button(top, text="📤 完整数据库", width=13,
                    command=self._export_full_xlsx).grid(
@@ -243,14 +240,8 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
                 row=0, column=12, padx=6)
 
     def _build_section_xlsx_io(self):
-        """已合并到 _build_section_data_source，保留空方法兼容旧调用"""
+        """已合并到 _build_section_data_source"""
         pass
-
-        if not _XLSX_OK:
-            ttk.Label(io_frame,
-                      text="  ⚠️ 未安装 openpyxl，请执行: pip install openpyxl",
-                      foreground="#C00000",
-                      font=("Consolas", 8)).pack(side="left", padx=10)
 
     def _build_section_filter(self, parent, row=0, column=0):
         """筛选条件面板（2×2 田字格 · 上左）"""
@@ -454,13 +445,10 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
                    command=self._show_all).pack(side="right", padx=4)
 
     def _build_section_result_table(self):
-        """查询结果表格（支持 Ctrl+A 选中 + 鼠标多选）"""
+        """查询结果表格"""
         result_frame = ttk.LabelFrame(self, text=" 查询结果 ", padding=6)
         result_frame.pack(fill="both", expand=True, padx=6, pady=(0, 4))
 
-        # ============================================================
-        #   顶部工具栏
-        # ============================================================
         res_bar = ttk.Frame(result_frame)
         res_bar.pack(fill="x", pady=(0, 4))
 
@@ -473,15 +461,11 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
                   text="  💡 Ctrl+A 全选当前页 | Ctrl/Shift+点击 多选",
                   foreground="#666", font=("", 8)).pack(side="left", padx=10)
 
-        # 已选数量
         self.checked_info_var = tk.StringVar(value="已选: 0")
         ttk.Label(res_bar, textvariable=self.checked_info_var,
                   foreground="#008000",
                   font=("Consolas", 9, "bold")).pack(side="right", padx=10)
 
-        # ============================================================
-        #   表格（无 check 列，使用原生选中）
-        # ============================================================
         table_frame = ttk.Frame(result_frame)
         table_frame.pack(fill="both", expand=True)
 
@@ -491,7 +475,6 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         self.tree = ttk.Treeview(table_frame, columns=columns,
                                  show="headings", selectmode="extended")
 
-        # ★ 用保存的列宽（字符 × 8 像素）
         for col in columns:
             self.tree.heading(col, text=headings[col],
                               command=lambda c=col: self._sort_by_column(c))
@@ -500,7 +483,6 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
             self.tree.column(col, width=pixel_w, anchor="w",
                              stretch=False)
 
-        # ★ 绑定鼠标松开事件 → 检测列宽变化并保存
         self.tree.bind("<ButtonRelease-1>", self._on_col_release, add="+")
 
         vsb = ttk.Scrollbar(table_frame, orient="vertical",
@@ -515,22 +497,14 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
-        # ★ 选中事件：更新"已选"数量
         self.tree.bind("<<TreeviewSelect>>", self._on_selection_changed)
 
-        # ★ Ctrl+A：全选当前页
         self.tree.bind("<Control-a>", self._on_ctrl_a)
         self.tree.bind("<Control-A>", self._on_ctrl_a)
 
-        # ★ 右键菜单
         self._setup_context_menu()
 
-        # ============================================================
-        #  ★ 列宽管理
-        # ============================================================
-
     def _load_col_widths(self):
-        """从配置文件读取用户保存的列宽，无则用默认"""
         widths = dict(self.DEFAULT_COL_WIDTHS)
         if COL_WIDTH_PATH.exists():
             try:
@@ -545,7 +519,6 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         self._col_widths = widths
 
     def _save_col_widths(self):
-        """保存当前列宽到配置文件"""
         try:
             COL_WIDTH_PATH.write_text(
                 json.dumps(self._col_widths, ensure_ascii=False, indent=2),
@@ -554,10 +527,7 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
             print(f"[F] ⚠️ 列宽保存失败: {e}")
 
     def _on_col_release(self, event):
-        """鼠标松开时检测列宽变化，变化则保存"""
-        # 只在列头区域触发（避免表格内部点击误触发）
         region = self.tree.identify("region", event.x, event.y)
-        # 空 region 也可能因为拖动出界导致，所以都处理
         changed = False
         for col in self._col_widths:
             try:
@@ -572,7 +542,6 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
             self._save_col_widths()
 
     def _reset_col_widths(self):
-        """恢复默认列宽"""
         if not messagebox.askyesno(
                 "恢复默认",
                 "将把所有列宽恢复为默认值。\n\n确定继续?"):
@@ -587,7 +556,6 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         self.set_status("✅ 已恢复默认列宽")
 
     def _build_section_pagination(self):
-        """分页控件"""
         page_bar = ttk.Frame(self)
         page_bar.pack(fill="x", padx=6, pady=(0, 4))
 
@@ -609,7 +577,6 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
                    command=self._next_page).pack(side="left", padx=2)
 
     def _build_section_status_bar(self):
-        """底部状态栏"""
         self.status_var = tk.StringVar(value="")
         ttk.Label(self, textvariable=self.status_var,
                   foreground="#804000", font=("Consolas", 9),
