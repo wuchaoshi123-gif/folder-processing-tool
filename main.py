@@ -18,7 +18,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from config_manager import load_config, update_config
-from tabs import TabA, TabB, TabC, TabD, TabE, TabF, TabG
+from tabs import TabA, TabB, TabC, TabD, TabE, TabF, TabG, TabG1
 
 class FolderBatchGUI:
     def __init__(self, root):
@@ -74,6 +74,7 @@ class FolderBatchGUI:
         self.tab_e = TabE(self.notebook, self)
         self.tab_f = TabF(self.notebook, self)
         self.tab_g = TabG(self.notebook, self)
+        self.tab_g1 = TabG1(self.notebook, self)
 
         self.notebook.add(self.tab_a, text=f"  {TabA.TAB_NAME}  ")
         self.notebook.add(self.tab_b, text=f"  {TabB.TAB_NAME}  ")
@@ -82,6 +83,7 @@ class FolderBatchGUI:
         self.notebook.add(self.tab_e, text=f"  {TabE.TAB_NAME}  ")
         self.notebook.add(self.tab_f, text=f"  {TabF.TAB_NAME}  ")
         self.notebook.add(self.tab_g, text=f"  {TabG.TAB_NAME}  ")
+        self.notebook.add(self.tab_g1, text=f"  {TabG1.TAB_NAME}  ")
 
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
