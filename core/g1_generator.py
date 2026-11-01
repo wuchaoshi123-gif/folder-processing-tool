@@ -2,7 +2,9 @@
 import random
 import re
 import math
+import time
 import os
+
 from pathlib import Path
 from datetime import datetime
 import concurrent.futures as cf
@@ -323,6 +325,8 @@ def generate_product_rows(p, config, keywords, errors=None):
 def _worker_generate_file(args):
     template_path, output_path, products, config, keywords = args
     try:
+        # ★ 加入这一行：确保多进程环境下每个文件的图片随机打乱完全不重复
+        random.seed(os.getpid() + int(time.time() * 1000))
         errors, all_rows = [], []
         for p in products:
             all_rows.extend(generate_product_rows(p, config, keywords, errors))
