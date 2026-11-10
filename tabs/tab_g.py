@@ -107,6 +107,15 @@ class TabG(BaseTab):
                   foreground="#804000",
                   font=("Consolas", 9, "bold")).pack(side="left")
 
+        # ★ 新增：域名过滤
+        row2c = ttk.Frame(src)
+        row2c.pack(fill="x", pady=(2, 0))
+        ttk.Label(row2c, text="图片域名:").pack(side="left")
+        self.domain_filter_var = tk.StringVar(value="全部")
+        self.domain_combo = ttk.Combobox(row2c, textvariable=self.domain_filter_var, width=30, state="readonly")
+        self.domain_combo.pack(side="left", padx=4)
+        self.domain_combo.bind("<<ComboboxSelected>>", lambda e: self._on_param_change())
+
         row3 = ttk.Frame(src)
         row3.pack(fill="x", pady=(6, 0))
         self.mark_used_var = tk.BooleanVar(value=True)
@@ -449,7 +458,15 @@ class TabG(BaseTab):
             return 0
         try:
             cur = self._conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM g_used_products")
+            domain = self.domain_filter_var.get() if hasattr(self, 'domain_filter_var') else "全部"
+            if domain and domain != "全部":
+                cur.execute("""
+                    SELECT COUNT(*) FROM g_used_products 
+                    JOIN products ON g_used_products.onlymulu = products.onlymulu 
+                    WHERE products.img_domain = ?
+                """, (domain,))
+            else:
+                cur.execute("SELECT COUNT(*) FROM g_used_products")
             return cur.fetchone()[0]
         except Exception:
             return 0
@@ -794,7 +811,16 @@ class TabG(BaseTab):
                 self._conn.close()
             self._conn = sqlite3.connect(db)
             self._conn.row_factory = sqlite3.Row
-            self._ensure_used_table()       # ★ 确保标记表存在
+            self._ensure_used_table()
+
+            # ★ 读取所有不重复的域名
+            cur = self._conn.cursor()
+            cur.execute("SELECT DISTINCT img_domain FROM products WHERE img_domain IS NOT NULL AND img_domain != ''")
+            domains = [r[0] for r in cur.fetchall()]
+            self.domain_combo["values"] = ["全部"] + domains
+            if self.domain_filter_var.get() not in ["全部"] + domains:
+                self.domain_filter_var.set("全部")
+
             n = self._total_products()
             self.db_info_var.set(f"✅ {n:,} 条")
             self._update_sample_info()
@@ -804,7 +830,11 @@ class TabG(BaseTab):
     def _total_products(self):
         try:
             cur = self._conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM products")
+            domain = self.domain_filter_var.get() if hasattr(self, 'domain_filter_var') else "全部"
+            if domain and domain != "全部":
+                cur.execute("SELECT COUNT(*) FROM products WHERE img_domain = ?", (domain,))
+            else:
+                cur.execute("SELECT COUNT(*) FROM products")
             return cur.fetchone()[0]
         except Exception:
             return 0
@@ -816,22 +846,34 @@ class TabG(BaseTab):
             return []
         cur = self._conn.cursor()
 
+        where_clauses = []
+        params = []
+
+        domain = self.domain_filter_var.get() if hasattr(self, 'domain_filter_var') else "全部"
+        if domain and domain != "全部":
+            where_clauses.append("img_domain = ?")
+            params.append(domain)
+
         if self.db_sample_mode_var.get() == "随机抽取":
             try:
                 n = int(self.db_sample_count_var.get() or 100)
             except ValueError:
                 n = 100
-            if n <= 0:
-                n = 100
+            if n <= 0: n = 100
 
-            # ★ 从"未用"里抽
-            cur.execute(
-                "SELECT * FROM products "
-                "WHERE onlymulu NOT IN "
-                "  (SELECT onlymulu FROM g_used_products) "
-                "ORDER BY RANDOM() LIMIT ?", (n,))
+            where_clauses.append("onlymulu NOT IN (SELECT onlymulu FROM g_used_products)")
+            sql = "SELECT * FROM products"
+            if where_clauses:
+                sql += " WHERE " + " AND ".join(where_clauses)
+            sql += " ORDER BY RANDOM() LIMIT ?"
+            params.append(n)
+            cur.execute(sql, params)
         else:
-            cur.execute("SELECT * FROM products ORDER BY id")
+            sql = "SELECT * FROM products"
+            if where_clauses:
+                sql += " WHERE " + " AND ".join(where_clauses)
+            sql += " ORDER BY id"
+            cur.execute(sql, params)
 
         rows = [dict(r) for r in cur.fetchall()]
         if limit:

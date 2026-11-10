@@ -877,6 +877,7 @@ class TabE(BaseTab):
                 "bands": p["brand"],
                 "bandsizechart": p["sizechart"],
                 "source_dir": str(self.target_dir),
+                "img_domain": domain,  # ★ 新增这一行，domain 是上面取出的域名
             }
 
             r = db.upsert_product(data)
@@ -1248,6 +1249,8 @@ class TabE(BaseTab):
                 "bands": p["brand"],
                 "bandsizechart": p["sizechart"],
                 "source_dir": str(self.target_dir),
+                # ★ 修改：新增下面这一行，直接获取界面输入框的最新值
+                "img_domain": self.domain_var.get().strip().rstrip("/"),
             }
             r = db.upsert_product(data)
             if r == "inserted":

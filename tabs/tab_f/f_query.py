@@ -22,19 +22,11 @@ class FQueryMixin:
         row = ttk.Frame(self.conditions_frame)
         row.pack(fill="x", pady=2)
 
-        # ★ 字段下拉：真实字段 + 分隔线 + 尺码派生字段
-        SEP = self.FIELD_SEP  # 见 f_main.py 新增常量
-        real_items = [f"{f[1]}({f[0]})" for f in self.FIELDS]
-        derived_items = [
-            f"{f[1]}({f[0]})"
-            for f in self.FILTER_FIELDS[len(self.FIELDS):]
-        ]
-        field_values = real_items + [SEP] + derived_items
-
-        field_var = tk.StringVar(value=self.FIELDS[0][0])
+        # ★ 字段下拉使用 FILTER_FIELDS（含尺码派生字段）
+        field_var = tk.StringVar(value=self.FILTER_FIELDS[0][0])
         ttk.Combobox(
-            row, textvariable=field_var, width=22, state="readonly",
-            values=field_values, height=25,  # ★ 一次显示 25 行
+            row, textvariable=field_var, width=18, state="readonly",
+            values=[f"{f[1]}({f[0]})" for f in self.FILTER_FIELDS],
         ).pack(side="left", padx=2)
 
         op_var = tk.StringVar(value="包含")
@@ -75,8 +67,6 @@ class FQueryMixin:
 
         for field_var, op_var, kw_var in conditions:
             field_str = field_var.get()
-            if field_str == "──────────────":  # ★ 跳过分隔线
-                continue
             field = (field_str.split("(")[-1].rstrip(")")
                      if "(" in field_str else field_str)
             op = op_var.get()
@@ -193,8 +183,6 @@ class FQueryMixin:
 
         for field_var, op_var, kw_var, _ in self.conditions:
             field_str = field_var.get()
-            if field_str == "──────────────":
-                continue
             field = (field_str.split("(")[-1].rstrip(")")
                      if "(" in field_str else field_str)
             op = op_var.get()
@@ -239,6 +227,10 @@ class FQueryMixin:
         self._sort_reverse = False
         self._current_page = 1
 
+        # 清空相似度筛选项的状态
+        if hasattr(self, "sim_scope_var"):
+            self.sim_scope_var.set("未筛选")
+
         note = f" (含 {len(py_filters)} 个尺码筛选)" if py_filters else ""
         self.status_var.set(
             f"查询完成: {len(self._all_rows):,} 条{note}{warn}")
@@ -250,18 +242,9 @@ class FQueryMixin:
     # ============================================================
     def _apply_python_filters(self, rows, py_filters,
                               logic="AND", has_sql_conditions=False):
-        """
-        rows:         list[dict]
-        py_filters:   [(field, op, kw), ...]
-        logic:        "AND" / "OR"
-        has_sql_conditions: 是否同时存在 SQL 条件（用于 OR 降级）
-        返回过滤后的 list[dict]
-        """
         if not py_filters:
             return rows
 
-        # 只有纯 Python 条件时才按用户逻辑 OR；混合场景下 PY 端统一 AND
-        # （混合 OR 已在状态栏提示）
         use_or = (logic == "OR" and not has_sql_conditions)
 
         result = []
@@ -274,10 +257,12 @@ class FQueryMixin:
         return result
 
     def _show_all(self):
+        """★ 修复：移除 LIMIT 500，重新拉取完整数据，同时清空相似度筛选状态"""
         if not self._conn:
             return
         try:
             cur = self._conn.cursor()
+            # 绝不加 LIMIT，加载全量数据进内存
             cur.execute("SELECT * FROM products ORDER BY id DESC")
             rows = cur.fetchall()
             self._all_rows = [dict(r) for r in rows]
@@ -285,8 +270,15 @@ class FQueryMixin:
             self._sort_column = None
             self._sort_reverse = False
             self._current_page = 1
+
+            # ★ 重置相似度筛选的状态提示
+            if hasattr(self, "sim_scope_var"):
+                self.sim_scope_var.set("未筛选")
+
             self.status_var.set(f"已加载全部: {len(self._all_rows):,} 条")
             self._update_edit_scope()
+            if hasattr(self, "_update_retrans_scope"):
+                self._update_retrans_scope()
             self._render_page()
         except Exception as e:
             messagebox.showerror("错误", str(e))
@@ -360,6 +352,7 @@ class FQueryMixin:
         end = start + page_size
         page_rows = self._all_rows[start:end]
 
+        # ★ 只渲染当前页的数据，不会卡
         for row in page_rows:
             values = []
             for fname, _, _ in self.FIELDS:
@@ -513,7 +506,8 @@ class FQueryMixin:
         self.status_var.set(
             f"相似度筛选: {len(matched):,} 条 (阈值≥{threshold}%)")
         self._update_edit_scope()
-        self._update_retrans_scope()
+        if hasattr(self, "_update_retrans_scope"):
+            self._update_retrans_scope()
 
         if matched:
             messagebox.showinfo(

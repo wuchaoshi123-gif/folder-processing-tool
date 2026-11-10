@@ -1,10 +1,7 @@
 # core/db_manager.py
-"""数据库管理器（含 englishname 字段）
-★ v2 修复:
-  - isolation_level=None 关闭隐式事务，修复 "BEGIN within a transaction" 崩溃
-  - 支持 with 上下文管理器
-  - row_factory = sqlite3.Row
-  - 新增 bulk_upsert_auto 便捷批量接口
+"""数据库管理器（含 englishname、img_domain 字段）
+★ v3 修复:
+  - 新增 img_domain 字段的自动迁移与写入支持
 """
 import sqlite3
 from pathlib import Path
@@ -22,8 +19,6 @@ class DBManager:
     #                  连接 & 初始化
     # ==========================================================
     def _connect(self):
-        # ★ 关键: isolation_level=None 关闭 Python sqlite3 的隐式事务
-        #   这样 cur.execute("BEGIN") 才是合法操作
         self.conn = sqlite3.connect(
             str(self.db_path),
             timeout=30,
@@ -63,6 +58,7 @@ class DBManager:
                 bands           TEXT,
                 bandsizechart   TEXT,
                 source_dir      TEXT,
+                img_domain      TEXT,
                 created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_onlymulu ON products(onlymulu);
@@ -83,13 +79,14 @@ class DBManager:
             CREATE INDEX IF NOT EXISTS idx_failed_reason ON failed_items(reason);
         """)
 
-        # ---- 自动迁移 ----
+        # ---- 自动迁移（给老表补字段） ----
         self._migrate_columns("failed_items", {
             "image_path": "TEXT",
             "ocr_text":   "TEXT",
         })
         self._migrate_columns("products", {
             "englishname": "TEXT",
+            "img_domain":  "TEXT",   # ★ 新增：自动迁移 img_domain
         })
 
     def _migrate_columns(self, table, columns):
@@ -119,10 +116,7 @@ class DBManager:
     #                   单条写入
     # ==========================================================
     def upsert_product(self, data):
-        """
-        以 onlymulu 为唯一键, 重复则跳过（不覆盖）
-        ★ 品牌自动转大写
-        """
+        """以 onlymulu 为唯一键, 重复则跳过（不覆盖）"""
         cur = self.conn.cursor()
         bands = (data.get("bands") or "").strip().upper()
         try:
@@ -130,8 +124,8 @@ class DBManager:
                 INSERT OR IGNORE INTO products
                     (nums, onlymulu, englishname, local_url, web_url, rufanyi,
                      shoessize, chuprice, images, bands,
-                     bandsizechart, source_dir)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     bandsizechart, source_dir, img_domain)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 data.get("nums"),
                 data.get("onlymulu"),
@@ -145,6 +139,7 @@ class DBManager:
                 bands,
                 data.get("bandsizechart"),
                 data.get("source_dir"),
+                data.get("img_domain", ""),  # ★ 新增
             ))
             return "inserted" if cur.rowcount > 0 else "duplicate"
         except Exception as e:
@@ -159,7 +154,7 @@ class DBManager:
                 UPDATE products SET
                     nums = ?, englishname = ?, local_url = ?, web_url = ?,
                     rufanyi = ?, shoessize = ?, chuprice = ?, images = ?,
-                    bands = ?, bandsizechart = ?, source_dir = ?
+                    bands = ?, bandsizechart = ?, source_dir = ?, img_domain = ?
                 WHERE onlymulu = ?
             """, (
                 data.get("nums"),
@@ -173,6 +168,7 @@ class DBManager:
                 bands,
                 data.get("bandsizechart"),
                 data.get("source_dir"),
+                data.get("img_domain", ""),  # ★ 新增
                 data.get("onlymulu"),
             ))
             return "updated" if cur.rowcount > 0 else "not_found"
@@ -204,7 +200,6 @@ class DBManager:
     #                   批量查询 / 写入
     # ==========================================================
     def get_existing_onlymulu(self, onlymulu_set):
-        """批量查询已存在的 onlymulu"""
         if not onlymulu_set:
             return set()
         cur = self.conn.cursor()
@@ -221,19 +216,13 @@ class DBManager:
         return result
 
     def bulk_write_with_action(self, new_items, dup_items, dup_action):
-        """
-        ★ 事务批量写入
-          new_items:   [(idx, onlymulu, data_dict), ...]
-          dup_items:   [(idx, onlymulu, data_dict), ...]
-          dup_action:  "skip" | "overwrite"
-        返回: (ok_cnt, dup_cnt, errors)
-        """
+        """事务批量写入"""
         ok_cnt = 0
         dup_cnt = 0
         errors = []
         cur = self.conn.cursor()
         try:
-            cur.execute("BEGIN")   # isolation_level=None 下合法
+            cur.execute("BEGIN")
 
             # ---------- 新记录 ----------
             for idx, om, data in new_items:
@@ -243,8 +232,8 @@ class DBManager:
                         INSERT OR IGNORE INTO products
                             (nums, onlymulu, englishname, local_url, web_url,
                              rufanyi, shoessize, chuprice, images, bands,
-                             bandsizechart, source_dir)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             bandsizechart, source_dir, img_domain)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         data.get("nums"), om,
                         data.get("englishname", ""),
@@ -252,7 +241,7 @@ class DBManager:
                         data.get("rufanyi"), data.get("shoessize"),
                         data.get("chuprice"), data.get("images"),
                         bands, data.get("bandsizechart"),
-                        data.get("source_dir"),
+                        data.get("source_dir"), data.get("img_domain", ""),
                     ))
                     if cur.rowcount > 0:
                         ok_cnt += 1
@@ -271,7 +260,7 @@ class DBManager:
                                 nums = ?, englishname = ?, local_url = ?,
                                 web_url = ?, rufanyi = ?, shoessize = ?,
                                 chuprice = ?, images = ?, bands = ?,
-                                bandsizechart = ?, source_dir = ?
+                                bandsizechart = ?, source_dir = ?, img_domain = ?
                             WHERE onlymulu = ?
                         """, (
                             data.get("nums"),
@@ -280,7 +269,7 @@ class DBManager:
                             data.get("rufanyi"), data.get("shoessize"),
                             data.get("chuprice"), data.get("images"),
                             bands, data.get("bandsizechart"),
-                            data.get("source_dir"), om,
+                            data.get("source_dir"), data.get("img_domain", ""), om,
                         ))
                         if cur.rowcount > 0:
                             dup_cnt += 1
@@ -299,11 +288,6 @@ class DBManager:
         return ok_cnt, dup_cnt, errors
 
     def bulk_upsert_auto(self, items, dup_action="skip"):
-        """
-        ★ 便捷接口: 自动查询重复并分流
-          items: [(idx, onlymulu, data_dict), ...]
-        返回: (ok_cnt, dup_cnt, errors)
-        """
         if not items:
             return 0, 0, []
         om_set = {om for _, om, _ in items}
@@ -334,7 +318,6 @@ class DBManager:
             print(f"[DB] add_failed 失败: {e}")
 
     def uppercase_all_bands(self):
-        """把 products 表所有 bands 字段转大写"""
         try:
             cur = self.conn.cursor()
             cur.execute("""
@@ -354,7 +337,6 @@ class DBManager:
         cur.execute("SELECT COUNT(*) FROM products")
         return cur.fetchone()[0]
 
-    # ==========================================================
     def close(self):
         if self.conn:
             try:

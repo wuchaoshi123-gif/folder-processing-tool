@@ -6,7 +6,7 @@
 - 7 个 Tab: A名称清洗 / B批量翻译 / C图片处理 / D历史报告 / E数据入库 / F整理数据 / G产品表格
 - 数据库: data\products.db（36,580 条）
 - 配置: %APPDATA%\FolderProcessingTool\*.json
-- Gitee: https://gitee.com/kuangren911/folder-processing-tool
+- GitHub: https://github.com/wuchaoshi123-gif/folder-processing-tool
 
 ## 已完成关键优化
 

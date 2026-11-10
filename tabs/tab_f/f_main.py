@@ -82,7 +82,12 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         ("rufanyi", "俄语翻译", "text"),
         ("web_url", "网络URL", "text"),
         ("bandsizechart", "尺码表", "text"),
+        ("img_domain", "图片域名", "text"),  # ★ 新增
+        ("local_url", "本地URL", "text"),  # ★ 新增
+        ("source_dir", "源目录", "text"),  # ★ 新增
         ("created_at", "入库时间", "text"),
+
+
 
     ]
     
@@ -109,6 +114,7 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
         ("bandsizechart", "尺码表"),
         ("onlymulu", "唯一目录"),
         ("nums", "编号"),
+        ("img_domain", "图片域名"),  # ★ 新增这一行
     ]
 
     OPERATORS = [
@@ -124,6 +130,7 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
 
     REPLACE_MODES = [
         "包含替换", "精确匹配", "正则替换", "前缀匹配", "后缀匹配",
+        "直接赋值",  # ★ 新增
     ]
 
     PAGE_SIZES = [50, 100, 200, 500, 1000, 2000]
@@ -618,6 +625,16 @@ class TabF(FXlsxMixin, FQueryMixin, FEditMixin, FRetransMixin,
                 self._conn.close()
             self._conn = sqlite3.connect(db_path)
             self._conn.row_factory = sqlite3.Row
+
+            # ★ 新增：自动检查并添加缺失的字段
+            cur = self._conn.cursor()
+            cur.execute("PRAGMA table_info(products)")
+            cols = [info[1] for info in cur.fetchall()]
+            if "img_domain" not in cols:
+                cur.execute("ALTER TABLE products ADD COLUMN img_domain TEXT")
+                self._conn.commit()
+                print("[F] ✅ 数据库自动添加 img_domain 字段")
+
             return True
         except Exception as e:
             messagebox.showerror("连接失败", str(e))

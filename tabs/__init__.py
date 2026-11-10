@@ -7,5 +7,6 @@ from .tab_e import TabE
 from .tab_f import TabF
 from .tab_g import TabG
 from .tab_g1 import TabG1
+from .tab_g2 import TabG2
 
-__all__ = ["TabA", "TabB", "TabC", "TabD", "TabE", "TabF", "TabG"]
+__all__ = ["TabA", "TabB", "TabC", "TabD", "TabE", "TabF", "TabG", "TabG1", "TabG2"]

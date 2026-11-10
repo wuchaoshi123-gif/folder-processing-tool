@@ -1,0 +1,153 @@
+{
+  "db_path": "L:\\PythonProject1\\Folder_processing_tool\\data\\products.db",
+  "template_dir": "L:/PythonProject1/Folder_processing_tool/b04-95ge-1029/5ces",
+  "output_dir": "L:/PythonProject1/Folder_processing_tool/b04-95ge-1029/5ces/000",
+  "keyword_file": "关键词.txt",
+  "header_row": "3",
+  "data_start_row": "4",
+  "max_products_per_file": "100",
+  "img_suffix": "",
+  "first_img": "2.jpg",
+  "name_max_len_ru": "95",
+  "name_max_len_en": "125",
+  "db_sample_mode": "随机抽取",
+  "db_sample_count": "100",
+  "mark_used": true,
+  "desc_html_prefix": "<p><h1><strong>Заметка</strong></h1></p>\n<p><h3><em>Наша посылка будет отправлена в почтовое отделение в России через почтовую\nсистемуПосылка прибудет в ваше местное российское почтовое\nотделениеПожалуйста свяжитесь с местным почтовым отделением чтобы получить\nвашу посылку.</em></h3></p>",
+  "profit_rate": "102",
+  "discount": "0.99",
+  "platform_fee": "0.1",
+  "freight_min": "50",
+  "freight_max": "99",
+  "sample_cost": "100",
+  "fields_a": [
+    [
+      "Model (seller SPU ID)*",
+      "GROUP"
+    ],
+    [
+      "Product name (Russian)",
+      "NAME_RU"
+    ],
+    [
+      "Product name (English)*",
+      "NAME_EN"
+    ],
+    [
+      "Main image*",
+      "MAIN_IMAGE"
+    ],
+    [
+      "Image #2",
+      "IMAGE_2"
+    ],
+    [
+      "Image #3",
+      "IMAGE_3"
+    ],
+    [
+      "Image #4",
+      "IMAGE_4"
+    ],
+    [
+      "Image #5",
+      "IMAGE_5"
+    ],
+    [
+      "Image #6",
+      "IMAGE_6"
+    ],
+    [
+      "Description (Russian)",
+      "'<h1>' + NAME_RU + '</h1>\\n<h1>' + NAME_EN + '</h1>\\n' + DESC_HTML"
+    ],
+    [
+      "Discounted price, CNY",
+      "calc_price(CHUPRICE)"
+    ],
+    [
+      "Price, CNY*",
+      "Discounted_price_CNY*3"
+    ],
+    [
+      "Model Number",
+      "brand_or_empty(BANDS)"
+    ]
+  ],
+  "fields_b": [
+    [
+      "SKU ID/Barcode (seller SKU ID)*",
+      "SKU_ID"
+    ],
+    [
+      "Shoe Size",
+      "SIZE"
+    ]
+  ],
+  "fields_c": [
+    [
+      "Order processing time (days)*",
+      "3"
+    ],
+    [
+      "Weight in packaging (kg)*",
+      "1"
+    ],
+    [
+      "Color",
+      "Multi"
+    ],
+    [
+      "Stocks",
+      "299"
+    ],
+    [
+      "Length in packaging (cm)*",
+      "30"
+    ],
+    [
+      "Width in packaging (cm)*",
+      "20"
+    ],
+    [
+      "Height in packaging (cm)*",
+      "10"
+    ],
+    [
+      "Shipping template*",
+      "Delivery by seller 1"
+    ],
+    [
+      "Bulk discount, %",
+      "3"
+    ],
+    [
+      "Bulk order from, pcs.",
+      "2"
+    ],
+    [
+      "Origin",
+      "Mainland China"
+    ],
+    [
+      "Fit",
+      "Fits true to size, take your normal size"
+    ],
+    [
+      "Shoe Width",
+      "Medium(B,M)"
+    ],
+    [
+      "Selling method*",
+      "Package"
+    ],
+    [
+      "Quantity in packaging",
+      "1"
+    ],
+    [
+      "Description (English)*",
+      "Наша посылка будет отправлена в почтовое отделение в России через почтовую\nсистемуПосылка прибудет в ваше местное российское почтовое\nотделениеПожалуйста свяжитесь с местным почтовым отделением чтобы получить\nвашу посылку."
+    ]
+  ]
+}

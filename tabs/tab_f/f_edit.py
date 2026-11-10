@@ -25,8 +25,9 @@ class FEditMixin:
         field = (field_str.split("(")[-1].rstrip(")")
                  if "(" in field_str else field_str)
         mode = self.edit_mode_var.get()
-        find = self.edit_find_var.get()
-        replace = self.edit_replace_var.get()
+        # ★ 强制去除首尾空格和换行符，解决“多出空白行”的问题
+        find = self.edit_find_var.get().strip()
+        replace = self.edit_replace_var.get().strip()
 
         valid_fields = [f[0] for f in self.EDITABLE_FIELDS]
         if field not in valid_fields:
@@ -39,7 +40,9 @@ class FEditMixin:
             value = ""
         value = str(value)
         try:
-            if mode == "包含替换":
+            if mode == "直接赋值":
+                return str(replace).strip()
+            elif mode == "包含替换":
                 if find in value:
                     return value.replace(find, replace)
             elif mode == "精确匹配":
@@ -67,7 +70,8 @@ class FEditMixin:
         if not params:
             return
         field, mode, find, replace = params
-        if not find and mode != "正则替换":
+
+        if not find and mode not in ("正则替换", "直接赋值"):
             messagebox.showwarning("提示", "请输入查找内容")
             return
 
@@ -79,7 +83,7 @@ class FEditMixin:
                 changes.append((row.get("id"), old_val, new_val))
 
         if not changes:
-            messagebox.showinfo("预览", "没有匹配的记录")
+            messagebox.showinfo("预览", "没有匹配的记录（或者原值与新值相同）")
             return
         self._show_preview_dialog(field, mode, find, replace, changes)
 
@@ -127,7 +131,7 @@ class FEditMixin:
         btn = ttk.Frame(win, padding=8)
         btn.pack(fill="x")
         if len(changes) > 30:
-            ttk.Label(btn, text=f"... 还有 {len(changes)-30} 条未显示",
+            ttk.Label(btn, text=f"... 还有 {len(changes) - 30} 条未显示",
                       foreground="#888").pack(side="left")
 
         ttk.Button(btn, text="取消",
@@ -146,7 +150,8 @@ class FEditMixin:
         if not params:
             return
         field, mode, find, replace = params
-        if not find and mode != "正则替换":
+
+        if not find and mode not in ("正则替换", "直接赋值"):
             messagebox.showwarning("提示", "请输入查找内容")
             return
 
@@ -158,14 +163,14 @@ class FEditMixin:
                 changes.append((row.get("id"), old_val, new_val))
 
         if not changes:
-            messagebox.showinfo("提示", "没有匹配的记录")
+            messagebox.showinfo("提示", "没有匹配的记录（或者原值与新值相同）")
             return
         if not messagebox.askyesno(
-            "确认修改",
-            f"将修改 {len(changes):,} 条记录\n\n"
-            f"目标字段: {field}\n匹配模式: {mode}\n"
-            f"查找: {find!r}\n替换为: {replace!r}\n\n"
-            f"⚠️ 建议先备份数据库。\n\n确定继续?"):
+                "确认修改",
+                f"将修改 {len(changes):,} 条记录\n\n"
+                f"目标字段: {field}\n匹配模式: {mode}\n"
+                f"查找: {find!r}\n替换为: {replace!r}\n\n"
+                f"⚠️ 建议先备份数据库。\n\n确定继续?"):
             return
         self._do_execute_batch_edit(field, mode, find, replace, changes)
 
@@ -174,6 +179,7 @@ class FEditMixin:
             messagebox.showerror("错误", "数据库未连接")
             return
 
+        # 数据库备份
         db_path = Path(self.db_path_var.get().strip())
         backup_path = db_path.parent / (
             f"{db_path.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
@@ -192,6 +198,7 @@ class FEditMixin:
             cur.execute("BEGIN")
             update_count = 0
             for rid, old, new in changes:
+                # 这里直接更新整表，因为筛选出来的是当前 _all_rows
                 cur.execute(
                     f"UPDATE products SET {field} = ? WHERE id = ?",
                     (new, rid))
@@ -199,6 +206,8 @@ class FEditMixin:
             self._conn.commit()
 
             elapsed = (datetime.now() - t0).total_seconds()
+
+            # ★ 强行刷新当前内存显示
             change_map = {rid: new for rid, _, new in changes}
             for row in self._all_rows:
                 if row.get("id") in change_map:
@@ -248,10 +257,10 @@ class FEditMixin:
         preview_text = "\n".join(preview_lines)
 
         if not messagebox.askyesno(
-            "确认删除",
-            f"⚠️ 将从数据库中永久删除 {n:,} 条记录\n\n"
-            f"{preview_text}\n\n"
-            f"此操作不可撤销（但会自动备份数据库）。\n\n确定继续?"):
+                "确认删除",
+                f"⚠️ 将从数据库中永久删除 {n:,} 条记录\n\n"
+                f"{preview_text}\n\n"
+                f"此操作不可撤销（但会自动备份数据库）。\n\n确定继续?"):
             return
 
         db_path = Path(self.db_path_var.get().strip())
@@ -297,7 +306,7 @@ class FEditMixin:
             self._all_rows = [
                 row for row in self._all_rows
                 if row.get("id") not in delete_ids
-                and row.get("onlymulu") not in delete_onlymulu
+                   and row.get("onlymulu") not in delete_onlymulu
             ]
             self._current_page = 1
             self._render_page()
